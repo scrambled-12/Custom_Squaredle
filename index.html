@@ -460,7 +460,7 @@ function loadBoardFromURL(){
     // now use YOUR existing function
     startGame();
   },0);
-
+  saveState();
   return true;
 }
 
@@ -548,6 +548,12 @@ function reset(){
 
 function submit(){
   if(solveMode) return;
+
+  if(found.has(current) || bonus.has(current)){
+  document.getElementById("outputBar").textContent = "Already Found";
+  reset();
+  return;
+  }
 
   let output="";
 
