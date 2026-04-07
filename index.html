@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body { margin:0; font-family:system-ui; background:#111; color:white; text-align:center; }
+
+#outputBar {
+  height:40px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:18px;
+}
+
+.grid,.input-grid {
+  width:90vw; height:90vw;
+  max-width:420px; max-height:420px;
+  margin:10px auto;
+  display:grid; gap:6px;
+  touch-action:none;
+}
+
+.input-tile,.tile {
+  width:100%; height:100%;
+  border-radius:8px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:5vw;
+}
+
+.input-tile { background:#1c1c1c; color:white; border:none; text-align:center; }
+.tile { background:#222; color:white; position:relative; }
+
+.tile.active { background:#4caf50; }
+
+.corner { position:absolute; font-size:10px; color:#aaa; }
+.bl { bottom:2px; left:4px; }
+.br { bottom:2px; right:4px; }
+
+button { margin:6px; padding:10px; border:none; border-radius:8px; background:#333; color:white; }
+
+.progress { height:10px; background:#333; margin:6px; border-radius:10px; }
+.bar { height:100%; width:0%; background:#4caf50; }
+
+.section { max-width:420px; margin:auto; text-align:left; }
+</style>
+</head>
+
+<body>
+
+<div id="createScreen">
+  <h3>Create Puzzle</h3>
+
+  <button onclick="setSize(3,this)">3x3</button>
+  <button onclick="setSize(4,this)">4x4</button>
+  <button onclick="setSize(5,this)" class="active-btn">5x5</button>
+  <button onclick="setSize(6,this)">6x6</button>
+
+  <div id="inputGrid" class="input-grid"></div>
+
+  <button onclick="startGame()">Play</button>
+  <button onclick="solvePuzzle()">Solve</button>
+  <button onclick="sharePuzzle()">Share</button>
+</div>
+
+<div id="gameScreen" style="display:none">
+
+  <button onclick="editBoard()">✏ EDIT BOARD</button>
+
+  <div id="outputBar"></div>
+
+  <div id="progressWrap">
+    Found: <span id="found">0</span> / <span id="total">0</span>
+    <div class="progress"><div id="bar" class="bar"></div></div>
+  </div>
+
+  <div id="grid" class="grid"></div>
+
+  <div id="wordList" class="section"></div>
+</div>
+
+<script>
+
+let size=5, board=[];
+let DICTIONARY=new Set();
+let validWords=new Set();
+let found=new Set();
+let bonus=new Set();
+let wordPaths={};
+let isRestoring = false;
+
+let current="", path=[];
+let solveMode=false;
+
+let NWL_DICTIONARY = new Set();
+
+async function loadNWLDictionary(){
+  const res = await fetch("https://raw.githubusercontent.com/dolph/dictionary/master/enable1.txt");
+  const text = await res.text();
+
+  NWL_DICTIONARY = new Set(
+    text.split("\n").map(w=>w.trim().toUpperCase())
+  );
+}
+
+// LOAD DICTIONARY
+async function loadDictionary(){
+  const res=await fetch("https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english.txt");
+  const text=await res.text();
+
+  DICTIONARY=new Set(
+    text.split("\n").map(w=>w.trim().toUpperCase()).filter(w=>w.length>=4)
+  );
+}
+loadDictionary();
+
+// SIZE
+function setSize(s,btn){
+  size=s;
+  document.querySelectorAll("#createScreen button").forEach(b=>b.classList.remove("active-btn"));
+  btn.classList.add("active-btn");
+  generateInputGrid();
+}
+
+// INPUT
+function generateInputGrid(){
+  const g=document.getElementById("inputGrid");
+  g.innerHTML="";
+  g.style.gridTemplateColumns=`repeat(${size},1fr)`;
+
+  for(let i=0;i<size*size;i++){
+    let input=document.createElement("input");
+    input.className="input-tile";
+    input.maxLength=1;
+    input.oninput=e=>{
+      let v=e.target.value.replace(/[^a-z]/gi,"").toUpperCase();
+      e.target.value=v.charAt(0);
+    };
+    g.appendChild(input);
+  }
+}
+
+// BOARD
+function buildBoard(){
+  const inputs=document.querySelectorAll(".input-tile");
+  board=[];
+  for(let i=0;i<size;i++){
+    let row=[];
+    for(let j=0;j<size;j++){
+      row.push(inputs[i*size+j].value||"A");
+    }
+    board.push(row);
+  }
+}
+
+// WORD ENGINE
+function computeWords(){
+  validWords=new Set();
+  wordPaths={};
+
+  function dfs(r,c,word,visited,path){
+    if(word.length>=4 && DICTIONARY.has(word)){
+      validWords.add(word);
+      if(!wordPaths[word]) wordPaths[word]=[...path];
+    }
+
+    if(word.length>10) return;
+
+    for(let dr=-1;dr<=1;dr++){
+      for(let dc=-1;dc<=1;dc++){
+        if(dr||dc){
+          let nr=r+dr,nc=c+dc;
+          let key=nr+","+nc;
+
+          if(nr>=0&&nc>=0&&nr<size&&nc<size && !visited.has(key)){
+            visited.add(key);
+            dfs(nr,nc,word+board[nr][nc],visited,[...path,key]);
+            visited.delete(key);
+          }
+        }
+      }
+    }
+  }
+
+  for(let i=0;i<size;i++){
+    for(let j=0;j<size;j++){
+      dfs(i,j,board[i][j],new Set([i+","+j]),[i+","+j]);
+    }
+  }
+
+  document.getElementById("total").textContent=validWords.size;
+}
+
+// PLAY
+function startGame(){
+  solveMode=false;
+
+  buildBoard();
+  computeWords();
+
+  if(!isRestoring){
+  found.clear();
+  bonus.clear();
+}
+
+  document.getElementById("progressWrap").style.display="block";
+  document.getElementById("bar").style.width="0%";
+  document.getElementById("found").textContent=0;
+  document.getElementById("outputBar").textContent="";
+
+  document.getElementById("createScreen").style.display="none";
+  document.getElementById("gameScreen").style.display="block";
+
+  buildGrid();
+  renderLists();
+  saveState();
+}
+
+// SOLVE
+function solvePuzzle(){
+  solveMode=true;
+
+  buildBoard();
+  computeWords();
+
+  document.getElementById("progressWrap").style.display="none";
+  document.getElementById("outputBar").textContent="";
+
+  document.getElementById("createScreen").style.display="none";
+  document.getElementById("gameScreen").style.display="block";
+
+  buildGrid(true);
+  renderSolveList();
+  saveState();
+}
+
+//SAVE STATE function
+function saveState(){
+  const state = {
+    size,
+    board,
+    found: Array.from(found),
+    bonus: Array.from(bonus),
+    solveMode
+  };
+  localStorage.setItem("ws_state", JSON.stringify(state));
+}
+
+function loadState(){
+  const data = localStorage.getItem("ws_state");
+  if(!data) return false;
+
+  const s = JSON.parse(data);
+
+  size = s.size;
+  board = s.board;
+  found = new Set(s.found);
+  bonus = new Set(s.bonus);
+  solveMode = s.solveMode;
+
+  // restore inputs for edit mode
+  generateInputGrid();
+  setTimeout(()=>{
+    const inputs=document.querySelectorAll(".input-tile");
+    for(let i=0;i<size;i++){
+      for(let j=0;j<size;j++){
+        inputs[i*size+j].value=board[i][j];
+      }
+    }
+
+    if(solveMode){
+      isRestoring = true;
+      solvePuzzle();
+      isRestoring = false;
+    } else {
+      isRestoring = true;
+      startGame();
+      isRestoring = false;
+    } document.getElementById("found").textContent = found.size;
+  document.getElementById("bar").style.width =
+    validWords.size ? (found.size / validWords.size * 100) + "%" : "0%";
+  },0);
+  
+  return true;
+}
+
+// ✅ FIXED EDIT FLOW
+function editBoard(){
+
+  if(found.size>0 || bonus.size>0){
+    if(!confirm("You'll lose your progress, do you want to proceed?")) return;
+  localStorage.removeItem("ws_state");
+  }
+
+  // reset ALL state cleanly
+  solveMode=false;
+  current="";
+  path=[];
+
+  found=new Set();
+  bonus=new Set();
+
+  document.getElementById("outputBar").textContent="";
+  document.getElementById("bar").style.width="0%";
+  document.getElementById("found").textContent=0;
+
+  document.getElementById("gameScreen").style.display="none";
+  document.getElementById("createScreen").style.display="block";
+
+  generateInputGrid();
+
+  setTimeout(()=>{
+    const inputs=document.querySelectorAll(".input-tile");
+    for(let i=0;i<size;i++){
+      for(let j=0;j<size;j++){
+        inputs[i*size+j].value=board[i][j];
+      }
+    }
+  },0);
+}
+
+// GRID + ANALYTICS
+const grid=document.getElementById("grid");
+
+function buildGrid(showStats=false){
+  grid.innerHTML="";
+  grid.style.gridTemplateColumns=`repeat(${size},1fr)`;
+
+  let startCount=Array(size*size).fill(0);
+  let useCount=Array(size*size).fill(0);
+
+  if(showStats){
+    validWords.forEach(w=>{
+      let path=wordPaths[w];
+      let [sr,sc]=path[0].split(",").map(Number);
+      startCount[sr*size+sc]++;
+      path.forEach(p=>{
+        let [r,c]=p.split(",").map(Number);
+        useCount[r*size+c]++;
+      });
+    });
+  }
+
+  board.forEach((r,i)=>{
+    r.forEach((l,j)=>{
+      let idx=i*size+j;
+
+      let d=document.createElement("div");
+      d.className="tile";
+      d.textContent=l;
+
+      if(showStats){
+        let bl=document.createElement("div");
+        bl.className="corner bl";
+        bl.textContent=startCount[idx];
+
+        let br=document.createElement("div");
+        br.className="corner br";
+        br.textContent=useCount[idx];
+
+        d.appendChild(bl);
+        d.appendChild(br);
+      }
+
+      grid.appendChild(d);
+    });
+  });
+}
+
+// LISTS
+function renderGrouped(data,title){
+  const div=document.createElement("div");
+  div.innerHTML=`<b>${title}</b>`;
+
+  const grouped={};
+
+  data.forEach(w=>{
+    let l=w.length;
+    if(!grouped[l]) grouped[l]=[];
+    grouped[l].push(w);
+  });
+
+  Object.keys(grouped).sort((a,b)=>a-b).forEach(len=>{
+    let words=grouped[len].sort();
+
+    let header=document.createElement("div");
+    header.innerHTML=`<br><b>${len}-letter (${words.length})</b>`;
+    div.appendChild(header);
+
+    let gridDiv=document.createElement("div");
+    gridDiv.style.display="grid";
+    gridDiv.style.gridTemplateColumns="repeat(4,1fr)";
+
+    words.forEach(w=>{
+      let c=document.createElement("div");
+      c.textContent=w;
+      gridDiv.appendChild(c);
+    });
+
+    div.appendChild(gridDiv);
+  });
+
+  return div;
+}
+
+function encodeBoardToURL(){
+  let flat = board.flat().join("");
+  let url = new URL(window.location.href);
+  url.searchParams.set("b", flat);
+  url.searchParams.set("s", size);
+  return url.toString();
+}
+
+function sharePuzzle(){
+  buildBoard(); // uses your existing function
+  const url = encodeBoardToURL();
+
+  if(navigator.share){
+    navigator.share({
+      title: "Custom Squaredle",
+      text: "Try this puzzle!",
+      url: url
+    });
+  } else {
+    navigator.clipboard.writeText(url);
+    alert("Link copied!");
+  }
+}
+
+function loadBoardFromURL(){
+  const params = new URLSearchParams(window.location.search);
+  const b = params.get("b");
+  const s = parseInt(params.get("s"));
+
+  if(!b || !s) return false;
+
+  size = s;
+
+  // rebuild board
+  board = [];
+  for(let i=0;i<size;i++){
+    let row=[];
+    for(let j=0;j<size;j++){
+      row.push(b[i*size+j]);
+    }
+    board.push(row);
+  }
+
+  // IMPORTANT: populate input grid (so edit still works later)
+  generateInputGrid();
+  setTimeout(()=>{
+    const inputs=document.querySelectorAll(".input-tile");
+    for(let i=0;i<size;i++){
+      for(let j=0;j<size;j++){
+        inputs[i*size+j].value=board[i][j];
+      }
+    }
+
+    // now use YOUR existing function
+    startGame();
+  },0);
+
+  return true;
+}
+
+function renderLists(){
+  const el=document.getElementById("wordList");
+  el.innerHTML="";
+  el.appendChild(renderGrouped(found,"Found Words"));
+  el.appendChild(renderGrouped(bonus,"Bonus Words"));
+}
+
+function renderSolveList(){
+  const el=document.getElementById("wordList");
+  el.innerHTML="";
+  el.appendChild(renderGrouped(validWords,"All Words ("+validWords.size+")"));
+}
+
+// TOUCH DISABLED IN SOLVE MODE
+function getIndex(x,y){
+  if(solveMode) return null;
+
+  const rect=grid.getBoundingClientRect();
+  const cell=rect.width/size;
+
+  const col=Math.floor((x-rect.left)/cell);
+  const row=Math.floor((y-rect.top)/cell);
+
+  if(row<0||col<0||row>=size||col>=size) return null;
+
+  const cx=rect.left+col*cell+cell/2;
+  const cy=rect.top+row*cell+cell/2;
+
+  if(Math.hypot(x-cx,y-cy)>cell*0.33) return null;
+
+  return row*size+col;
+}
+
+function select(i){
+
+  if(solveMode) return;
+
+  // ignore same tile
+  if(i === path[path.length-1]) return;
+
+  // 🔁 BACKTRACK (allow going one step back)
+  if(path.length >= 2 && i === path[path.length-2]){
+    let last = path.pop();
+    grid.children[last].classList.remove("active");
+    current = current.slice(0,-1);
+    document.getElementById("outputBar").textContent = current;
+    return;
+  }
+
+  // 🚫 STRICT ADJACENCY CHECK
+  if(path.length){
+    let prev = path[path.length-1];
+
+    let r1 = Math.floor(prev / size);
+    let c1 = prev % size;
+
+    let r2 = Math.floor(i / size);
+    let c2 = i % size;
+
+    let dr = Math.abs(r1 - r2);
+    let dc = Math.abs(c1 - c2);
+
+    // reject if not adjacent (including diagonal allowed)
+    if(dr > 1 || dc > 1) return;
+  }
+
+  // prevent reuse
+  if(path.includes(i)) return;
+
+  // select tile
+  grid.children[i].classList.add("active");
+  path.push(i);
+  current += grid.children[i].textContent;
+
+  document.getElementById("outputBar").textContent = current;
+}
+
+function reset(){
+  current=""; path=[];
+  document.querySelectorAll(".tile").forEach(t=>t.classList.remove("active"));
+}
+
+function submit(){
+  if(solveMode) return;
+
+  let output="";
+
+  if(current.length<4){
+    output="Too Short";
+  }
+  else if(validWords.has(current)){
+    found.add(current);
+    output=current;
+  }
+  else if(NWL_DICTIONARY.has(current)){
+  bonus.add(current);
+  output="⭐ "+current;
+}
+else{
+  output="❌ "+current;
+}
+
+  document.getElementById("outputBar").textContent=output;
+
+  renderLists();
+
+  document.getElementById("found").textContent=found.size;
+  document.getElementById("bar").style.width=(found.size/validWords.size*100)+"%";
+
+  reset();
+  saveState();
+}
+
+grid.addEventListener("touchstart",e=>{
+  let i=getIndex(e.touches[0].clientX,e.touches[0].clientY);
+  if(i!=null) select(i);
+});
+
+grid.addEventListener("touchmove",e=>{
+  e.preventDefault();
+  let i=getIndex(e.touches[0].clientX,e.touches[0].clientY);
+  if(i!=null) select(i);
+});
+
+grid.addEventListener("touchend",submit);
+
+async function init(){
+  await loadDictionary();
+  await loadNWLDictionary();
+
+  if(loadBoardFromURL()) return;
+  if(loadState()) return;
+
+  generateInputGrid();
+}
+
+init();
+
+</script>
+
+</body>
+</html>
