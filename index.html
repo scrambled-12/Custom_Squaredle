@@ -601,8 +601,8 @@ async function init(){
   await loadDictionary();
   await loadNWLDictionary();
 
-  if(loadBoardFromURL()) return;
   if(loadState()) return;
+  if(loadBoardFromURL()) return;
 
   generateInputGrid();
 }
