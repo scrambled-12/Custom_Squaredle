@@ -459,8 +459,8 @@ function loadBoardFromURL(){
 
     // now use YOUR existing function
     startGame();
+    saveState();
   },0);
-
   return true;
 }
 
@@ -549,6 +549,12 @@ function reset(){
 function submit(){
   if(solveMode) return;
 
+  if(found.has(current) || bonus.has(current)){
+  document.getElementById("outputBar").textContent = "Already Found";
+  reset();
+  return;
+  }
+
   let output="";
 
   if(current.length<4){
@@ -594,8 +600,8 @@ async function init(){
   await loadDictionary();
   await loadNWLDictionary();
 
-  if(loadBoardFromURL()) return;
   if(loadState()) return;
+  if(loadBoardFromURL()) return;
 
   generateInputGrid();
 }
