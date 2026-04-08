@@ -50,6 +50,7 @@ button { margin:6px; padding:10px; border:none; border-radius:8px; background:#3
 <body>
 
 <div id="createScreen">
+  <h1>HintsTest<h1>
   <h3>Create Puzzle</h3>
 
   <button onclick="setSize(3,this)">3x3</button>
@@ -67,7 +68,8 @@ button { margin:6px; padding:10px; border:none; border-radius:8px; background:#3
 <div id="gameScreen" style="display:none">
 
   <button onclick="editBoard()">✏ EDIT BOARD</button>
-
+  <button onclick="toggleHints()">💡 HINTS</button>
+  
   <div id="outputBar"></div>
 
   <div id="progressWrap">
@@ -89,7 +91,7 @@ let found=new Set();
 let bonus=new Set();
 let wordPaths={};
 let isRestoring = false;
-
+let showHints = false;
 let current="", path=[];
 let solveMode=false;
 
@@ -122,7 +124,31 @@ function setSize(s,btn){
   btn.classList.add("active-btn");
   generateInputGrid();
 }
+  
+function computeTileStatsFromSet(wordSet){
+  let startCount = Array(size*size).fill(0);
+  let useCount = Array(size*size).fill(0);
 
+  wordSet.forEach(w=>{
+    let path = wordPaths[w];
+
+    let [sr,sc] = path[0].split(",").map(Number);
+    startCount[sr*size+sc]++;
+
+    path.forEach(p=>{
+      let [r,c] = p.split(",").map(Number);
+      useCount[r*size+c]++;
+    });
+  });
+
+  return { startCount, useCount };
+}
+
+
+function toggleHints(){
+  showHints = !showHints;
+  buildGrid(showHints, true);
+}
 // INPUT
 function generateInputGrid(){
   const g=document.getElementById("inputGrid");
@@ -212,7 +238,7 @@ function startGame(){
   document.getElementById("createScreen").style.display="none";
   document.getElementById("gameScreen").style.display="block";
 
-  buildGrid();
+  buildGrid(false);
   renderLists();
   saveState();
 }
@@ -230,7 +256,7 @@ function solvePuzzle(){
   document.getElementById("createScreen").style.display="none";
   document.getElementById("gameScreen").style.display="block";
 
-  buildGrid(true);
+  buildGrid(true, false);
   renderSolveList();
   saveState();
 }
@@ -323,24 +349,28 @@ function editBoard(){
 // GRID + ANALYTICS
 const grid=document.getElementById("grid");
 
-function buildGrid(showStats=false){
+function buildGrid(showStats=false, isHintMode=false){
   grid.innerHTML="";
   grid.style.gridTemplateColumns=`repeat(${size},1fr)`;
 
-  let startCount=Array(size*size).fill(0);
-  let useCount=Array(size*size).fill(0);
+let startCount = Array(size*size).fill(0);
+let useCount = Array(size*size).fill(0);
 
-  if(showStats){
-    validWords.forEach(w=>{
-      let path=wordPaths[w];
-      let [sr,sc]=path[0].split(",").map(Number);
-      startCount[sr*size+sc]++;
-      path.forEach(p=>{
-        let [r,c]=p.split(",").map(Number);
-        useCount[r*size+c]++;
-      });
-    });
+if(showStats){
+  let sourceSet;
+
+  if(isHintMode){
+    // 🔥 ONLY remaining words
+    sourceSet = new Set([...validWords].filter(w => !found.has(w)));
+  } else {
+    // existing solve mode
+    sourceSet = validWords;
   }
+
+  let stats = computeTileStatsFromSet(sourceSet);
+  startCount = stats.startCount;
+  useCount = stats.useCount;
+}
 
   board.forEach((r,i)=>{
     r.forEach((l,j)=>{
@@ -562,6 +592,9 @@ function submit(){
   }
   else if(validWords.has(current)){
     found.add(current);
+    if(showHints){
+      buildGrid(true, true);
+    }
     output=current;
   }
   else if(NWL_DICTIONARY.has(current)){
