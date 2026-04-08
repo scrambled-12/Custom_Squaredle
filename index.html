@@ -379,6 +379,7 @@ if(showStats){
       let d=document.createElement("div");
       d.className="tile";
       d.textContent=l;
+      d.dataset.letter = l;  // 🔥 important
 
       if(showStats){
         let bl=document.createElement("div");
@@ -566,7 +567,7 @@ function select(i){
   // select tile
   grid.children[i].classList.add("active");
   path.push(i);
-  current += grid.children[i].textContent;
+  current += grid.children[i].dataset.letter;
 
   document.getElementById("outputBar").textContent = current;
 }
